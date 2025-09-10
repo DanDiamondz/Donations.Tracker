@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Donations Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --bg:#111417;--panel:#1a1f24;--panel-2:#222831;--text:#eef2f6;--muted:#9aa7b2;
+    --acc:#2dd4bf;--border:#2a3240;--focus:#7dd3fc;
+    /* TYPE chips */
+    --chip-food:#c7f7c2;--chip-clothes:#c9e7ff;--chip-toiletries:#fff6bd;--chip-monetary:#e6d7ff;
+    /* STATUS chips */
+    --chip-pending:#ffe256;--chip-approved:#69db7c;--chip-denied:#ff6b6b;
+    --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  .app{max-width:1100px;margin:24px auto;padding:0 16px 48px}
+  header{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  h1{margin:0;font-size:18px;font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .pad{padding:12px}
+  input[type="file"],button,select,input[type="text"],input[type="date"],textarea{
+    background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px 10px;outline:none
+  }
+  input::placeholder{color:#8a97a3}
+  button{cursor:pointer}
+  button.primary{background:var(--acc);color:#022;border:none}
+  button.danger{background:var(--danger);color:#fff;border:none}
+  button:focus, input:focus, select:focus, textarea:focus{box-shadow:0 0 0 3px var(--focus)}
+  .spacer{flex:1}
+  .muted{color:var(--muted);font-size:12px}
+  .table-wrap{overflow:auto;max-height:70vh}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-bottom:1px solid var(--border);padding:10px 8px;text-align:left;vertical-align:middle}
+  th{position:sticky;top:0;background:var(--panel);z-index:1;user-select:none;cursor:pointer}
+  tr:hover td{background:#1d232b}
+  /* Colored chips in table */
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;color:#111;border:1px solid #00000022}
+  .chip.type-food{background:var(--chip-food)}
+  .chip.type-clothes{background:var(--chip-clothes)}
+  .chip.type-toiletries{background:var(--chip-toiletries)}
+  .chip.type-monetary{background:var(--chip-monetary)}
+  .chip.status-pending{background:var(--chip-pending)}
+  .chip.status-approved{background:var(--chip-approved)}
+  .chip.status-denied{background:var(--chip-denied)}
+  .toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--border);padding:12px 14px;border-radius:10px;max-width:380px;z-index:9999}
+  .hidden{display:none !important}
+  .form-grid{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:8px}
+  /* Filter chips */
+  .filterbar{display:flex;gap:6px;flex-wrap:wrap}
+  .fchip{border:1px solid var(--border);background:#0b1320;color:#b7c9d6;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .fchip.active{outline:2px solid var(--focus);color:#e5f4ff}
+  /* Context menu (Donor dbl-click) */
+  .ctx{position:fixed;z-index:10000;background:var(--panel);border:1px solid var(--border);border-radius:10px;min-width:180px;box-shadow:0 10px 40px #0008;padding:6px}
+  .ctx button{width:100%;text-align:left;margin:2px 0}
+  .ctx .trash{display:inline-flex;gap:6px;align-items:center}
+  .trash svg{width:14px;height:14px}
+</style>
+
+<!-- XLSX sidecar loader (optional but recommended for .xlsx) -->
+<script>
+(function(){var s=document.createElement('script');s.src='./xlsx.full.min.js';
+s.onload=function(){window._XLSX_READY=!!window.XLSX};s.onerror=function(){window._XLSX_READY=false};document.head.appendChild(s);})();
+</script>
+</head>
+<body>
+<div class="app" role="application">
+  <header>
+    <h1>Donations Tracker</h1>
+    <div class="spacer"></div>
+    <button id="btn-export" title="Export CSV">Export CSV</button>
+  </header>
+
+  <div class="card pad" aria-labelledby="import-title">
+    <div class="row">
+      <strong id="import-title">Import</strong>
+      <input id="file-input" type="file" accept=".xlsx,.csv,.tsv" aria-label="Choose .xlsx, .csv or .tsv file" />
+      <button id="btn-paste" title="Paste from Excel or Google Sheets">Paste</button>
+      <button id="btn-clean-empties" title="Remove Empty Rows">Remove Empty Rows</button>
+      <div class="spacer"></div>
+      <span class="muted">Accepts .xlsx (Master or first sheet), .csv, .tsv. Autosaves.</span>
+    </div>
+  </div>
+
+  <div class="card pad" style="margin-top:12px;">
+    <div class="row" style="gap:10px;align-items:center;margin-bottom:8px">
+      <input id="search" type="text" placeholder="Search all columns…" aria-label="Search all columns" />
+      <button id="btn-clear">Clear Search</button>
+      <div class="spacer"></div>
+      <strong>Add Row</strong>
+    </div>
+    <form id="add-form" class="form-grid" autocomplete="off">
+      <input name="donor" placeholder="Donor *" required />
+      <input name="contact" placeholder="Donor Contact" />
+      <select name="type" required>
+        <option value="">Type *</option><option>Food</option><option>Clothes</option><option>Toiletries</option><option>Monetary</option>
+      </select>
+      <input name="date" type="date" />
+      <input name="notes" placeholder="Notes" />
+      <select name="status" required>
+        <option value="">Status *</option><option>Pending</option><option>Approved</option><option>Denied</option><option>Don’t Qualify</option>
+      </select>
+      <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;margin-top:2px">
+        <button class="primary" type="submit">Save</button>
+        <button type="reset">Reset</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card pad" style="margin-top:12px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+      <span class="muted">Filter by Type:</span>
+      <div id="type-filters" class="filterbar">
+        <button class="fchip active" data-type="All">All</button>
+        <button class="fchip" data-type="Food">Food</button>
+        <button class="fchip" data-type="Clothes">Clothes</button>
+        <button class="fchip" data-type="Toiletries">Toiletries</button>
+        <button class="fchip" data-type="Monetary">Monetary</button>
+      </div>
+      <div class="spacer"></div>
+      <span class="muted">Filter by Status:</span>
+      <div id="status-filters" class="filterbar">
+        <button class="fchip active" data-status="All">All</button>
+        <button class="fchip" data-status="Approved">Approved</button>
+        <button class="fchip" data-status="Denied">Denied</button>
+        <button class="fchip" data-status="Pending">Pending</button>
+        <button class="fchip" data-status="Don’t Qualify">Don’t Qualify</button>
+      </div>
+    </div>
+    <div class="table-wrap" role="region" aria-label="Donations table">
+      <table id="grid">
+        <thead>
+          <tr>
+            <th data-col="donor" tabindex="0" title="Double-click donor for Edit/Delete menu">Donor</th>
+            <th data-col="contact" tabindex="0">Donor Contact</th>
+            <th data-col="type" tabindex="0">Donation (Type)</th>
+            <th data-col="date" tabindex="0">App Submission Date</th>
+            <th data-col="notes" tabindex="0">Notes</th>
+            <th data-col="status" tabindex="0">Approved (Status)</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Paste Modal -->
+<div id="paste-modal" class="toast hidden" role="dialog" aria-modal="true" style="left:50%;transform:translateX(-50%);bottom:auto;top:10%;max-width:min(900px,92vw)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <strong>Paste from Excel / Google Sheets</strong>
+    <button id="paste-close">Close</button>
+  </div>
+  <textarea id="paste-area" rows="12" style="width:100%;margin-top:6px" aria-label="Paste area"></textarea>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+    <button id="paste-run" class="primary">Process & Import</button>
+  </div>
+</div>
+
+<!-- Context Menu (Donor double-click) -->
+<div id="ctx" class="ctx hidden" role="menu">
+  <button id="ctx-edit">Edit row</button>
+  <button id="ctx-delete" class="danger trash" title="Delete row">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9z"/></svg>
+    Delete
+  </button>
+</div>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  'use strict';
+  var STORAGE_KEY='donations_v7';
+  var state={rows:[],sortCol:null,sortDir:1,filterText:'',typeFilter:'All',statusFilter:'All'};
+  var tbody=document.getElementById('tbody');
+
+  function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(toast._);toast._=setTimeout(function(){t.classList.add('hidden')},3400);}
+  function save(){try{localStorage.setItem(STORAGE_KEY, JSON.stringify(state.rows));}catch(e){}}
+  function load(){try{state.rows=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]')||[];}catch(e){state.rows=[];}}
+
+  function normalizeDate(v){
+    if(!v) return '';
+    v=(''+v).trim();
+    var m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/); if(m) return v;
+    var m2=v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if(m2) return m2[3]+'-'+('0'+m2[1]).slice(-2)+'-'+('0'+m2[2]).slice(-2);
+    var d=new Date(v); if(!isNaN(d.getTime())) return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+    return '';
+  }
+  function prettyDate(v){var m=v&&v.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?(m[2]+'/'+m[3]+'/'+m[1]):(v||'');}
+  function keyOf(r){return[(r.donor||'').trim().toLowerCase(),(r.contact||'').trim().toLowerCase(),(r.type||'').trim().toLowerCase(),normalizeDate(r.date),(r.notes||'').trim().toLowerCase(),(r.status||'').trim().toLowerCase()].join('|');}
+  function dedupe(a){var map=Object.create(null),out=[],removed=0;for(var i=0;i<a.length;i++){var k=keyOf(a[i]);if(map[k])removed++;else{map[k]=1;out.push(a[i]);}}return{rows:out,removed:removed};}
+
+  // Chips for Type & Status
+  function chipType(t){
+    var cls='chip ',low=(t||'').toLowerCase();
+    if(low==='food')cls+='type-food';
+    else if(low==='clothes')cls+='type-clothes';
+    else if(low==='toiletries')cls+='type-toiletries';
+    else if(low==='monetary')cls+='type-monetary';
+    else return document.createTextNode(t||'');
+    var s=document.createElement('span'); s.className=cls; s.textContent=t; return s;
+  }
+  function chipStatus(sv){
+    var cls='chip ',low=(sv||'').toLowerCase();
+    if(low==='pending')cls+='status-pending';
+    else if(low==='approved')cls+='status-approved';
+    else if(low==='denied'||low==="don't qualify"||low==='don’t qualify')cls+='status-denied';
+    else return document.createTextNode(sv||'');
+    var s=document.createElement('span'); s.className=cls; s.textContent=sv; return s;
+  }
+
+  // Status parsing helpers
+  function normalizeStatus(v){
+    v=(v==null?'':(''+v)).trim(); if(!v) return '';
+    var low=v.toLowerCase().replace(/\u2019/g,"'").replace(/\s+/g,' ').trim();
+    if(low.startsWith('approv')||low==='approved'||low==='yes'||low==='y')return'Approved';
+    if(low.startsWith('deni')||low.includes('declin')||low.includes('reject')||low.includes('refus')||low.includes('not approved')||low==='no'||low==='n')return'Denied';
+    if(low.includes("don't qualify")||low.includes("dont qualify")||low.includes('do not qualify')||low.includes('did not qualify')||low.includes('not eligible')||low.includes('ineligible'))return'Don’t Qualify';
+    if(low.startsWith('pend'))return'Pending';
+    return '';
+  }
+  function inferStatusFromRow(rowArray){
+    var f={den:false,dq:false,app:false,pen:false};
+    for(var i=0;i<rowArray.length;i++){
+      var n=normalizeStatus(rowArray[i]);
+      if(n==='Denied')f.den=true;else if(n==='Don’t Qualify')f.dq=true;else if(n==='Approved')f.app=true;else if(n==='Pending')f.pen=true;
+    }
+    if(f.den)return'Denied'; if(f.dq)return'Don’t Qualify'; if(f.app)return'Approved'; if(f.pen)return'Pending'; return'';
+  }
+
+  // Header detect/map
+  function normalizeHeader(h){return(h==null?'':(''+h)).replace(/\*/g,'').replace(/\(.*?\)/g,'').replace(/[#:\u2013\u2014]/g,' ').trim().toLowerCase();}
+  var HEADER_HINTS=[/donor/,/(donor )?contact/,/(donation|type)/,/((submission|app).*\bdate\b|\bdate\b)/,/\bnotes?\b/,/(approved|status|decision|outcome|result)/];
+  function scoreHeaderRow(cells){var s=0;for(var i=0;i<cells.length;i++){var n=normalizeHeader(cells[i]);for(var h=0;h<HEADER_HINTS.length;h++)if(HEADER_HINTS[h].test(n)){s+=2;break;}}var texty=0;for(i=0;i<cells.length;i++){if(/\D/.test(String(cells[i]||'')))texty++;}return s+Math.min(texty,cells.length);}
+  function findHeaderRow(aoa){var best={idx:0,score:-1},max=Math.min(20,aoa.length);for(var r=0;r<max;r++){var sc=scoreHeaderRow(aoa[r]||[]);if(sc>best.score)best={idx:r,score:sc};}return best.idx;}
+  function mapHeadersByName(header){
+    var map=[-1,-1,-1,-1,-1,-1]; if(!header) return map; var seen={};
+    for(var i=0;i<header.length;i++){
+      var h=normalizeHeader(header[i]),idx=-1;
+      if(/^(donor|donor name)$/.test(h))idx=0;
+      else if(/^(donor contact|contact|phone|email|contact info)$/.test(h))idx=1;
+      else if(/^(donation|type|donation type)$/.test(h))idx=2;
+      else if(/^(app submission date|submission date|app date|date)$/.test(h))idx=3;
+      else if(/^(notes|note|comments|comment)$/.test(h))idx=4;
+      else if(/^(approved|status|approved status|decision|outcome|result)$/.test(h))idx=5;
+      if(idx>-1&&!seen[idx]){map[idx]=i;seen[idx]=true;}
+    }
+    return map;
+  }
+  function mapHeadersBySniff(aoa,startRow){
+    var map=[-1,-1,-1,-1,-1,-1],sample=aoa.slice(startRow,startRow+30);
+    function scoreStatus(c){var s=0;for(var r=0;r<sample.length;r++){var v=sample[r]&&sample[r][c];if(!v)continue;var n=normalizeStatus(v);if(n)s+=3;else{var low=(''+v).toLowerCase();if(low.includes('declin')||low.includes('reject')||low.includes('refus')||low.includes('not approved'))s+=2;if(low.includes('qualify')||low.includes('eligib'))s+=1;}}return s;}
+    function scoreDate(c){var s=0;for(var r=0;r<sample.length;r++){var v=sample[r]&&sample[r][c];if(!v)continue;var iso=normalizeDate(v);if(iso)s+=2;else if(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test((''+v)))s+=1;}return s;}
+    function scoreType(c){var s=0;for(var r=0;r<sample.length;r++){var v=sample[r]&&sample[r][c];if(!v)continue;var low=(''+v).trim().toLowerCase();if(low==='food'||low==='clothes'||low==='toiletries'||low==='monetary')s+=2;}return s;}
+    var width=0;for(var i=0;i<sample.length;i++)width=Math.max(width,(sample[i]||[]).length);
+    var bestS={col:-1,score:-1},bestD={col:-1,score:-1},bestT={col:-1,score:-1};
+    for(var c=0;c<width;c++){var st=scoreStatus(c);if(st>bestS.score)bestS={col:c,score:st};var dt=scoreDate(c);if(dt>bestD.score)bestD={col:c,score:dt};var tp=scoreType(c);if(tp>bestT.score)bestT={col:c,score:tp};}
+    if(bestT.score>0)map[2]=bestT.col;if(bestD.score>0)map[3]=bestD.col;if(bestS.score>0)map[5]=bestS.col;
+    for(var k=0;k<6;k++)if(map[k]===-1)map[k]=k;return map;
+  }
+
+  // Filtering + rendering
+  function matchesFilter(r,q,typeF,statusF){
+    if(typeF && typeF!=='All' && (r.type||'')!==typeF) return false;
+    if(statusF && statusF!=='All' && (r.status||'')!==statusF) return false;
+    if(!q) return true; q=q.toLowerCase();
+    var cols=[r.donor,r.contact,r.type,prettyDate(normalizeDate(r.date)),r.notes,r.status];
+    for(var i=0;i<cols.length;i++){if((cols[i]||'').toLowerCase().includes(q))return true;}
+    return false;
+  }
+  function sortRows(rows){if(!state.sortCol)return rows;var c=state.sortCol,d=state.sortDir;return rows.slice().sort(function(a,b){var va=a[c]||'',vb=b[c]||'';if(c==='date'){va=normalizeDate(va);vb=normalizeDate(vb);}if(va<vb)return-1*d;if(va>vb)return 1*d;return 0;});}
+  function render(){
+    var filtered=[];for(var i=0;i<state.rows.length;i++) if(matchesFilter(state.rows[i],state.filterText,state.typeFilter,state.statusFilter)) filtered.push(state.rows[i]);
+    var rows=sortRows(filtered); tbody.innerHTML='';
+    for(var r=0;r<rows.length;r++){
+      var row=rows[r]; var tr=document.createElement('tr'); tr.setAttribute('data-key', keyOf(row));
+      addCell(tr,row.donor,'donor','donor-menu');
+      addCell(tr,row.contact,'contact','text');
+      addCell(tr,row.type,'type','select-type',true);
+      addCell(tr,prettyDate(normalizeDate(row.date)),'date','date',true);
+      addCell(tr,row.notes,'notes','text');
+      addCell(tr,row.status,'status','select-status',true);
+      tbody.appendChild(tr);
+    }
+  }
+  function addCell(tr,value,col,editorKind,asChip){
+    var td=document.createElement('td'); td.setAttribute('data-col',col); td.setAttribute('tabindex','0');
+    if(asChip){ if(col==='type') td.appendChild(chipType(value)); else if(col==='status') td.appendChild(chipStatus(value)); else td.textContent=value||''; }
+    else td.textContent=value||'';
+    if(editorKind==='donor-menu'){
+      td.addEventListener('dblclick',function(e){ openCtx(e, tr.getAttribute('data-key')); });
+      td.title="Double-click for Edit/Delete";
+    }else{
+      td.addEventListener('dblclick',function(){ beginEdit(td,editorKind); });
+      td.addEventListener('keydown',function(e){ if(e.key==='Enter'){ beginEdit(td,editorKind); } });
+    }
+    tr.appendChild(td);
+  }
+
+  function beginEdit(td,kind){
+    if(td.querySelector('.editor')) return;
+    var col=td.getAttribute('data-col'), tr=td.parentNode, rowKey=tr.getAttribute('data-key');
+    var idx=state.rows.findIndex(function(r){return keyOf(r)===rowKey}); if(idx<0) return;
+    var original=state.rows[idx][col]||'';
+    var ed;
+    if(kind==='select-type'){
+      ed=document.createElement('select'); ['Food','Clothes','Toiletries','Monetary'].forEach(function(v){var o=document.createElement('option');o.textContent=v;ed.appendChild(o);}); ed.value=original||'Food';
+    }else if(kind==='select-status'){
+      ed=document.createElement('select'); ['Pending','Approved','Denied','Don’t Qualify'].forEach(function(v){var o=document.createElement('option');o.textContent=v;ed.appendChild(o);}); ed.value=original||'Pending';
+    }else if(kind==='date'){
+      ed=document.createElement('input'); ed.type='date'; ed.value=normalizeDate(original);
+    }else{
+      ed=document.createElement('input'); ed.type='text'; ed.value=original;
+    }
+    ed.className='editor'; ed.style.width='100%';
+    ed.addEventListener('keydown',function(e){ if(e.key==='Escape'){ cancel(); } if(e.key==='Enter'){ commit(); } });
+    ed.addEventListener('blur',function(){ commit(); });
+    var old=td.innerHTML; td.innerHTML=''; td.appendChild(ed); ed.focus();
+
+    function commit(){
+      var newVal=ed.value; if(kind==='date') newVal=normalizeDate(newVal)||normalizeDate(ed.value);
+      state.rows[idx][col]=newVal; save();
+      td.innerHTML='';
+      if(col==='type') td.appendChild(chipType(newVal));
+      else if(col==='status') td.appendChild(chipStatus(newVal));
+      else if(col==='date') td.textContent=prettyDate(normalizeDate(newVal));
+      else td.textContent=newVal||'';
+      tr.setAttribute('data-key', keyOf(state.rows[idx]));
+      toast('Saved.');
+    }
+    function cancel(){ td.innerHTML=old; }
+  }
+
+  // Context menu for Donor (Edit/Delete)
+  var ctx=document.getElementById('ctx'), ctxKey=null;
+  function openCtx(e,key){
+    ctxKey=key;
+    ctx.style.left=(e.clientX+6)+'px'; ctx.style.top=(e.clientY+6)+'px';
+    ctx.classList.remove('hidden');
+  }
+  document.addEventListener('click',function(ev){
+    if(!ctx.classList.contains('hidden') && !ctx.contains(ev.target)) ctx.classList.add('hidden');
+  });
+  document.getElementById('ctx-edit').addEventListener('click',function(){
+    ctx.classList.add('hidden');
+    var tr=[].slice.call(tbody.querySelectorAll('tr')).find(function(n){return n.getAttribute('data-key')===ctxKey});
+    if(!tr) return; var donorTd=tr.querySelector('td[data-col="donor"]');
+    if(donorTd) beginEdit(donorTd,'text');
+  });
+  document.getElementById('ctx-delete').addEventListener('click',function(){
+    ctx.classList.add('hidden'); if(!ctxKey) return;
+    if(!confirm('Delete this row?')) return;
+    var before=state.rows.length;
+    state.rows=state.rows.filter(function(r){return keyOf(r)!==ctxKey});
+    save(); render();
+    toast(before-state.rows.length>0?'Row deleted.':'Nothing to delete.');
+  });
+
+  // Remove Empty Rows
+  function isEmptyRow(r){
+    return !((r.donor||'').trim()||(r.contact||'').trim()||(r.type||'').trim()||(normalizeDate(r.date))||(r.notes||'').trim()||(r.status||'').trim());
+  }
+  document.getElementById('btn-clean-empties').addEventListener('click',function(){
+    var before=state.rows.length;
+    state.rows=state.rows.filter(function(r){return !isEmptyRow(r)});
+    save(); render();
+    toast('Removed '+(before-state.rows.length)+' empty row(s).');
+  });
+
+  // Sort / search / filter chips
+  var ths=document.querySelectorAll('th[data-col]');
+  for(var i=0;i<ths.length;i++){
+    (function(th){
+      th.addEventListener('click',function(){toggleSort(th.getAttribute('data-col'));});
+      th.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleSort(th.getAttribute('data-col'));}});
+    })(ths[i]);
+  }
+  function toggleSort(col){ if(state.sortCol===col){state.sortDir*=-1;} else {state.sortCol=col;state.sortDir=1;} render(); }
+  document.getElementById('btn-clear').addEventListener('click',function(){var s=document.getElementById('search');s.value='';state.filterText='';render();});
+  document.getElementById('search').addEventListener('input',function(){state.filterText=this.value||'';render();});
+
+  document.getElementById('type-filters').addEventListener('click',function(e){
+    var b=e.target.closest('.fchip'); if(!b) return;
+    [].forEach.call(this.querySelectorAll('.fchip'), function(x){x.classList.remove('active');});
+    b.classList.add('active'); state.typeFilter=b.getAttribute('data-type'); render();
+  });
+  document.getElementById('status-filters').addEventListener('click',function(e){
+    var b=e.target.closest('.fchip'); if(!b) return;
+    [].forEach.call(this.querySelectorAll('.fchip'), function(x){x.classList.remove('active');});
+    b.classList.add('active'); state.statusFilter=b.getAttribute('data-status'); render();
+  });
+
+  // Paste modal
+  var pasteModal=document.getElementById('paste-modal');
+  document.getElementById('btn-paste').addEventListener('click',function(){document.getElementById('paste-area').value='';pasteModal.classList.remove('hidden');});
+  document.getElementById('paste-close').addEventListener('click',function(){pasteModal.classList.add('hidden');});
+  document.getElementById('paste-run').addEventListener('click',function(){
+    var raw=document.getElementById('paste-area').value||'';
+    if(/<table/i.test(raw)){
+      var doc=new DOMParser().parseFromString(raw,'text/html');
+      var trs=doc.querySelectorAll('table tr'); var rows=[], i;
+      for(i=0;i<trs.length;i++){var cells=trs[i].querySelectorAll('th,td'),r=[],j;for(j=0;j<cells.length;j++)r.push(cells[j].textContent.trim());rows.push(r);}
+      processAOA(rows);
+    }else{
+      var lines=raw.replace(/\r/g,'').split('\n').filter(function(s){return s.length>0});
+      var rows2=lines.map(function(line){return line.split('\t');});
+      processAOA(rows2);
+    }
+    pasteModal.classList.add('hidden');
+  });
+
+  // Import handlers
+  document.getElementById('file-input').addEventListener('change', function(){
+    var f=this.files&&this.files[0]; if(!f) return;
+    var name=f.name.toLowerCase();
+    if(name.endsWith('.csv')||name.endsWith('.tsv')) handleCSVFile(f, name.endsWith('.tsv')?'\t':',');
+    else if(name.endsWith('.xlsx')){
+      if(!window._XLSX_READY||!window.XLSX){ toast('To read .xlsx offline, put xlsx.full.min.js next to this file. CSV/TSV/Paste still work.'); }
+      else handleXLSXFile(f);
+    } else toast('Unsupported file type.');
+    this.value='';
+  });
+  function handleCSVFile(file,delim){
+    var r=new FileReader();
+    r.onload=function(){ processAOA(parseCSV(r.result||'',delim)); };
+    r.onerror=function(){ toast('Failed to read file.'); };
+    r.readAsText(file);
+  }
+  function handleXLSXFile(file){
+    var r=new FileReader();
+    r.onload=function(){
+      try{
+        var data=new Uint8Array(r.result);
+        var wb=XLSX.read(data,{type:'array'});
+        var sheetName=pickSheetName(wb.SheetNames);
+        var ws=wb.Sheets[sheetName];
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
+        processAOA(aoa);
+      }catch(e){ console.error(e); toast('Could not parse .xlsx.'); }
+    };
+    r.readAsArrayBuffer(file);
+  }
+  function pickSheetName(names){
+    if(!names||!names.length) return 'Sheet1';
+    for(var i=0;i<names.length;i++){
+      var n=(''+names[i]).trim().toLowerCase();
+      if(n==='master' || n.startsWith('master')) return names[i];
+    }
+    return names[0];
+  }
+  function parseCSV(text,delim){
+    var out=[],row=[],field='',i=0,q=false,c;delim=delim||',';
+    while(i<text.length){c=text[i];
+      if(q){ if(c==='\"'){ if(text[i+1]==='\"'){field+='\"';i++;} else q=false; } else field+=c; }
+      else { if(c==='\"') q=true; else if(c===delim){row.push(field);field='';} else if(c==='\n'){row.push(field);out.push(row);row=[];field='';} else if(c!=='\r'){field+=c;} }
+      i++;
+    } row.push(field); out.push(row); return out;
+  }
+
+  function processAOA(aoa){
+    if(!aoa||!aoa.length){ toast('Nothing to import.'); return; }
+    var hdrIdx=findHeaderRow(aoa);
+    var hdr=(aoa[hdrIdx]||[]).map(function(x){return x==null?'':String(x)});
+    var map=mapHeadersByName(hdr);
+    var start=hdrIdx+1;
+    if(map[2]===-1||map[3]===-1||map[5]===-1){
+      var sniff=mapHeadersBySniff(aoa,start);
+      for(var m=0;m<6;m++){if(map[m]===-1)map[m]=sniff[m];}
+    }
+    importRows(aoa, map, start);
+  }
+
+  function importRows(aoa, mapping, start){
+    var incoming=[];
+    for(var r=start;r<aoa.length;r++){
+      var row=aoa[r]; if(!row||row.length===0) continue;
+      function at(m){return(row[m]!==undefined&&row[m]!==null)?(''+row[m]).trim():'';}
+      var rawType=at(mapping[2]), rawDate=at(mapping[3]), rawStatus=at(mapping[5]);
+      var status=normalizeStatus(rawStatus); if(!status) status=inferStatusFromRow(row); if(!status) status='Pending';
+      incoming.push({
+        donor: at(mapping[0]),
+        contact: at(mapping[1]),
+        type: (function(v){var low=(v||'').trim().toLowerCase(); if(low==='food')return'Food'; if(low==='clothes')return'Clothes'; if(low==='toiletries')return'Toiletries'; if(low==='monetary')return'Monetary'; return v||'Food';})(rawType),
+        date: normalizeDate(rawDate),
+        notes: at(mapping[4]),
+        status: status
+      });
+    }
+    var merged=dedupe(state.rows.concat(incoming)); state.rows=merged.rows; save(); render();
+    toast('Imported '+incoming.length+' row(s). Removed '+merged.removed+' duplicate(s). Auto-saved.');
+  }
+
+  // Add row
+  document.getElementById('add-form').addEventListener('submit',function(e){
+    e.preventDefault();
+    var fd=new FormData(this);
+    var donor=(fd.get('donor')||'').trim(),type=(fd.get('type')||'').trim(),status=(fd.get('status')||'').trim();
+    if(!donor||!type||!status){toast('Please fill required fields: Donor, Type, Status.');return;}
+    var row={donor:donor,contact:(fd.get('contact')||'').trim(),type:type,date:normalizeDate(fd.get('date')||''),notes:(fd.get('notes')||'').trim(),status:status};
+    var res=dedupe(state.rows.concat([row])); var changed=res.rows.length-state.rows.length; state.rows=res.rows; save(); render();
+    this.reset(); toast(changed>0?'Row added. Auto-saved.':'Duplicate ignored.');
+  });
+
+  // Export CSV
+  document.getElementById('btn-export').addEventListener('click',function(){
+    var hdr=['Donor','Donor Contact','Donation (Type)','App Submission Date','Notes','Approved (Status)'];
+    var out=[hdr.join(',')];
+    for(var i=0;i<state.rows.length;i++){var r=state.rows[i]; out.push([r.donor,r.contact,r.type,normalizeDate(r.date),r.notes,r.status].map(csvEsc).join(','));}
+    var blob=new Blob([out.join('\r\n')],{type:'text/csv'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='donations_export.csv'; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+  });
+  function csvEsc(s){s=(s==null?'':String(s));return /[",\r\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s;}
+
+  // Init
+  load(); render();
+})();
+</script>
+</body>
+</html>
